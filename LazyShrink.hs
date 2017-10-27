@@ -3,47 +3,73 @@ module LazyShrink where
 import Data.IORef
 import System.IO.Unsafe
 
-data Tree = Node Int Tree Tree
-          | Leaf
-          deriving (Ord, Eq, Show)
+{- It looks like instances of `Lazy` can be derived automatically with
+ - very little effort -}
+class Lazy a where
+  numNodes :: a -> Int
+  annotate :: Int -> IORef [Int] -> a -> (a, Int)
+  prune    :: a -> [Int] -> a
 
-numNodes :: Tree -> Int
-numNodes Leaf = 1
-numNodes (Node _ l r) = 1 + numNodes l + numNodes r
+ann :: IORef [Int] -> Int -> a -> a
+ann ref i a = unsafePerformIO $ atomicModifyIORef ref (\is -> ((i:is), ())) >> return a
 
-annotate :: Int -> IORef [Int] -> Tree -> (Tree, Int)
-annotate i ref Leaf         = (unsafePerformIO $ atomicModifyIORef ref (\is -> ((i:is), ())) >> return Leaf, i + 1)
-annotate i ref (Node k l r) =
-  let (l', i')  = annotate (i + 1) ref l
-      (r', i'') = annotate i' ref r
-  in (unsafePerformIO $ atomicModifyIORef ref (\is -> ((i:is), ())) >> return (Node k l' r'), i'' + 1)
-
-findIndecies :: Tree -> (Tree -> Bool) -> IO [Int]
-findIndecies tree pred = do
+findIndecies :: Lazy a => a -> (a -> Bool) -> IO [Int]
+findIndecies a pred = do
   ref <- newIORef []
-  let (tree', _) = annotate 0 ref tree
-  -- To make sure that (pred tree') is evaluated
-  if (pred tree') then return () else return ()
+  let (a', _) = annotate 0 ref a
+  -- Evaluate as much as necessary
+  if pred a' then return () else return ()
   readIORef ref
 
-pruneAllExcept :: Tree -> [Int] -> Maybe Tree
-pruneAllExcept Leaf xs = if 0 `notElem` xs then Nothing else Just Leaf
-pruneAllExcept (Node k l r) xs
-  | 0 `notElem` xs = Nothing
-  | otherwise      =
-    let l' = pruneAllExcept l (map (\c -> c - 1) xs)
-        r' = pruneAllExcept r (map (\c -> c - (numNodes l + 1)) xs)
-    in Just $ Node k (maybe Leaf id l') (maybe Leaf id r')
-
-testAndPrune :: Tree -> (Tree -> Bool) -> IO Tree
+testAndPrune :: Lazy a => a -> (a -> Bool) -> IO a
 testAndPrune t p = do
   idxs <- findIndecies t p
-  return $ maybe Leaf id (pruneAllExcept t idxs)
+  return $ prune t idxs
 
 {- Test predicate -}
+data Tree a = Node a (Tree a) (Tree a)
+            | Leaf
+            deriving Show
+
 data Nat = Zero
          | Succ Nat
-         deriving (Eq, Show)
+         deriving Show
+
+instance Lazy a => Lazy (Tree a) where
+  numNodes t = case t of
+    Leaf       -> 1
+    Node v l r -> 1 + numNodes v + numNodes l + numNodes r
+
+  annotate i ref Leaf         = (ann ref i Leaf, i + 1)
+  annotate i ref (Node v l r) =
+    let (v', i')   = annotate (i + 1) ref v
+        (l', i'')  = annotate i' ref l
+        (r', i''') = annotate i'' ref r
+    in (ann ref i (Node v' l' r'), i''')
+
+  prune Leaf xs = Leaf
+  prune (Node v l r) xs
+    | 0 `notElem` xs = Leaf
+    | otherwise      =
+      let v' = prune v (map (\c -> c - 1) xs)
+          l' = prune l (map (\c -> c - (numNodes v + 1)) xs)
+          r' = prune r (map (\c -> c - (numNodes v + numNodes l + 1)) xs)
+      in Node v' l' r'
+
+instance Lazy Nat where
+  numNodes t = case t of
+    Zero   -> 1
+    Succ n -> 1 + numNodes n
+
+  annotate i ref Zero = (ann ref i Zero, i + 1)
+  annotate i ref (Succ n) = 
+    let (n', i') = annotate (i + 1) ref n
+    in (ann ref i (Succ n'), i')
+
+  prune Zero _ = Zero
+  prune (Succ n) xs
+    | 0 `notElem` xs = Zero
+    | otherwise = Succ $ prune n (map (\c -> c - 1) xs)
 
 gt :: Nat -> Nat -> Bool
 gt Zero _            = False
@@ -51,22 +77,22 @@ gt (Succ x) Zero     = True
 gt (Succ x) (Succ y) = x `gt` y
 
 max' :: Nat -> Nat -> Nat
-max' a b = if gt a b then a else b
+max' a b = if gt b a then b else a
 
-height :: Tree -> Nat
+height :: Tree a -> Nat
 height Leaf = Zero
 height (Node _ l r) = Succ (max' (height l) (height r))
 
-higherThan :: Nat -> Tree -> Bool
-higherThan h t = h `gt` (height t)
+lowerThanOrEqualTo :: Nat -> Tree a -> Bool
+lowerThanOrEqualTo h t = h `gt` height t
 
-example :: IO Tree
-example = testAndPrune (Node 0
-                             (Node 1
-                                   (Node 2
-                                         (Node 3 Leaf Leaf)
+example :: IO (Tree Nat)
+example = testAndPrune (Node (Succ (Succ Zero))
+                             (Node (Succ Zero)
+                                   (Node (Succ (Succ Zero))
+                                         (Node (Succ (Succ (Succ Zero))) (Node Zero (Node Zero Leaf Leaf) Leaf) Leaf)
                                          Leaf)
                                    Leaf)
-                             (Node 0 Leaf Leaf)
+                             (Node Zero (Node (Succ (Succ Zero)) (Node Zero Leaf Leaf) Leaf) Leaf)
                        )
-                       (higherThan (Succ (Succ Zero)))
+                       (lowerThanOrEqualTo (Succ (Succ Zero)))
