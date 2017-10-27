@@ -25,6 +25,9 @@ instance Arbitrary a => Arbitrary (Tree a) where
       go 0 = return Leaf
       go d = oneof [ return Leaf, Node <$> arbitrary <*> go (d - 1) <*> go (d - 1) ]
 
+{- I don't like this implementation of `mutate`,
+ - I want the semantics to be something like
+ - "change an arbitrary, _evaluated_ node into something else" -}
 instance (Arbitrary a, Mutate a) => Mutate (Tree a) where
   mutate Leaf         = Node <$> arbitrary <*> arbitrary <*> arbitrary
   mutate (Node v l r) = oneof [ Node <$> mutate v <*> return l <*> return r
