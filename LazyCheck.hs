@@ -21,7 +21,7 @@ lazyCheck p = generate arbitrary >>= go 100
 {- Example -}
 instance Arbitrary a => Arbitrary (Tree a) where
   arbitrary = sized go
-    where
+    where 
       go 0 = return Leaf
       go d = oneof [ return Leaf, Node <$> arbitrary <*> go (d - 1) <*> go (d - 1) ]
 
@@ -32,12 +32,12 @@ instance (Arbitrary a, Mutate a) => Mutate (Tree a) where
                               , Node <$> return v <*> return l <*> mutate r
                               , return Leaf ]
 
+int2Nat :: Int -> Nat
+int2Nat 0 = Zero
+int2Nat n = Succ (int2Nat (n - 1))
+
 instance Arbitrary Nat where
-  arbitrary = go . abs <$> arbitrary
-    where
-      go :: Int -> Nat
-      go 0 = Zero
-      go n = Succ (go (n - 1))
+  arbitrary = int2Nat . abs <$> arbitrary
 
 instance Mutate Nat where
   mutate Zero = Succ <$> arbitrary
