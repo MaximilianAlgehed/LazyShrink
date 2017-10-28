@@ -8,7 +8,7 @@ class Mutate a where
   mutate :: a -> Gen a
 
 lazyCheck :: (Arbitrary a, Mutate a, Lazy a) => (a -> Bool) -> IO (Maybe a)
-lazyCheck p = generate arbitrary >>= go 100
+lazyCheck p = generate arbitrary >>= go 1000 >>= maybe (return Nothing) (fmap Just . lazyShrink p)
   where
     go 0 a = return Nothing
     go n a
@@ -27,13 +27,24 @@ instance Arbitrary a => Arbitrary (Tree a) where
 
 {- I don't like this implementation of `mutate`,
  - I want the semantics to be something like
- - "change an arbitrary, _evaluated_ node into something else" -}
+ - "change an arbitrary node into something else" -}
 instance (Arbitrary a, Mutate a) => Mutate (Tree a) where
-  mutate Leaf         = Node <$> arbitrary <*> arbitrary <*> arbitrary
-  mutate (Node v l r) = oneof [ Node <$> mutate v <*> return l <*> return r
-                              , Node <$> return v <*> mutate l <*> return r
-                              , Node <$> return v <*> return l <*> mutate r
-                              , return Leaf ]
+  mutate t = do
+    let nodes = go t :: Int
+    i <- choose (0, nodes)
+    change i t
+    where
+      go Leaf = 1
+      go (Node _ l r) = 1 + go l + go r
+      
+      change 0 t = arbitrary
+      change n Leaf = return Leaf
+      change n (Node v l r) =
+        let n' = n - 1 in
+        if n' > go l then
+          Node v l <$> change (n' - go l) r
+        else
+          Node v <$> change n' l <*> return r 
 
 int2Nat :: Int -> Nat
 int2Nat 0 = Zero

@@ -2,6 +2,7 @@ module LazyShrink where
 
 import Data.IORef
 import System.IO.Unsafe
+import Data.List
 
 {- It looks like instances of `Lazy` can be derived automatically with
  - very little effort -}
@@ -24,7 +25,10 @@ findIndecies a pred = do
 testAndPrune :: Lazy a => a -> (a -> Bool) -> IO a
 testAndPrune t p = do
   idxs <- findIndecies t p
-  return $ prune t idxs
+  return $ prune t (sort idxs)
+
+lazyShrink :: Lazy a => (a -> Bool) -> a -> IO a
+lazyShrink p a = testAndPrune a p
 
 {- Test predicate -}
 data Tree a = Node a (Tree a) (Tree a)
@@ -47,14 +51,13 @@ instance Lazy a => Lazy (Tree a) where
         (r', i''') = annotate i'' ref r
     in (ann ref i (Node v' l' r'), i''')
 
-  prune Leaf xs = Leaf
-  prune (Node v l r) xs
-    | 0 `notElem` xs = Leaf
-    | otherwise      =
-      let v' = prune v (map (\c -> c - 1) xs)
-          l' = prune l (map (\c -> c - (numNodes v + 1)) xs)
-          r' = prune r (map (\c -> c - (numNodes v + numNodes l + 1)) xs)
+  prune (Node v l r) xs@(0:_) =
+      let v' = prune v $ truncate 1 xs
+          l' = prune l $ truncate (1 + numNodes v) xs
+          r' = prune r $ truncate (1 + numNodes v + numNodes l) xs
+          truncate i xs = filter (>=0) $ map (\x -> x - i) xs
       in Node v' l' r'
+  prune _ _ = Leaf 
 
 instance Lazy Nat where
   numNodes t = case t of
