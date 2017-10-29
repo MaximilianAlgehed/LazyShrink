@@ -3,7 +3,11 @@ module LazyShrink where
 import Data.IORef
 import System.IO.Unsafe
 import Data.List
+
 import Test.QuickCheck
+import Test.LeanCheck
+import Test.LazySmallCheck hiding (cons0, cons1, cons3, (\/))
+import qualified Test.LazySmallCheck as L
 
 {- It looks like instances of `Lazy` can be derived automatically with
  - very little effort -}
@@ -81,6 +85,14 @@ instance Lazy a => Lazy (Tree a) where
       in Node v' l' r'
   prune _ _ = Leaf 
 
+instance Listable a => Listable (Tree a) where
+  tiers =  cons0 Leaf
+        \/ cons3 Node
+
+instance Serial a => Serial (Tree a) where
+  series =  L.cons0 Leaf
+         L.\/ L.cons3 Node
+
 int2Nat :: Int -> Nat
 int2Nat 0 = Zero
 int2Nat n = Succ (int2Nat (n - 1))
@@ -106,6 +118,14 @@ instance Lazy Nat where
     | 0 `notElem` xs = Zero
     | otherwise = Succ $ prune n (map (\c -> c - 1) xs)
 
+instance Listable Nat where
+  tiers =  cons0 Zero
+        \/ cons1 Succ
+
+instance Serial Nat where
+  series =  L.cons0 Zero
+         L.\/ L.cons1 Succ
+
 gt :: Nat -> Nat -> Bool
 gt Zero _            = False
 gt (Succ x) Zero     = True
@@ -121,13 +141,9 @@ height (Node _ l r) = Succ (max' (height l) (height r))
 lowerThanOrEqualTo :: Nat -> Tree a -> Bool
 lowerThanOrEqualTo h t = h `gt` height t
 
-example :: IO (Tree Nat)
-example = testAndPrune (Node (Succ (Succ Zero))
-                             (Node (Succ Zero)
-                                   (Node (Succ (Succ Zero))
-                                         (Node (Succ (Succ (Succ Zero))) (Node Zero (Node Zero Leaf Leaf) Leaf) Leaf)
-                                         Leaf)
-                                   Leaf)
-                             (Node Zero (Node (Succ (Succ Zero)) (Node Zero Leaf Leaf) Leaf) Leaf)
-                       )
-                       (lowerThanOrEqualTo (Succ (Succ Zero)))
+isBST :: Tree Nat -> Bool
+isBST Leaf = True
+isBST (Node n l r) = isBST l && isBST r && allAre (\v -> n `gt` v) l && allAre (\v -> v `gt` n) r
+  where
+    allAre p Leaf = True
+    allAre p (Node v l r) = p v && allAre p l && allAre p r

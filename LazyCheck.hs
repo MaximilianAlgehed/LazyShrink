@@ -8,13 +8,18 @@ class Mutate a where
   mutate :: a -> Gen a
 
 lazyCheck :: (Arbitrary a, Mutate a, Lazy a) => (a -> Bool) -> IO (Maybe a)
-lazyCheck p = generate arbitrary >>= go 1000 >>= maybe (return Nothing) (fmap Just . lazyShrink p)
+lazyCheck p = generate arbitrary >>= go max >>= maybe (return Nothing) (fmap Just . lazyShrink p)
   where
+    max = 1000
     go 0 a = return Nothing
     go n a
       | p a       = do
+        putStr $ "\r" ++ show (max - n)
         a' <- testAndPrune a p 
-        generate (mutate a) >>= go (n - 1)
+        if (n - 1 `mod` 10 == 0) then
+          generate arbitrary >>= go (n - 1)
+        else
+          generate (mutate a) >>= go (n - 1)
       -- a is a counterexample
       | otherwise = return (Just a)
 
