@@ -19,11 +19,6 @@ lazyCheck p = generate arbitrary >>= go 1000 >>= maybe (return Nothing) (fmap Ju
       | otherwise = return (Just a)
 
 {- Example -}
-instance Arbitrary a => Arbitrary (Tree a) where
-  arbitrary = sized go
-    where 
-      go 0 = return Leaf
-      go d = oneof [ return Leaf, Node <$> arbitrary <*> go (d - 1) <*> go (d - 1) ]
 
 {- I don't like this implementation of `mutate`,
  - I want the semantics to be something like
@@ -45,13 +40,6 @@ instance (Arbitrary a, Mutate a) => Mutate (Tree a) where
           Node v l <$> change (n' - go l) r
         else
           Node v <$> change n' l <*> return r 
-
-int2Nat :: Int -> Nat
-int2Nat 0 = Zero
-int2Nat n = Succ (int2Nat (n - 1))
-
-instance Arbitrary Nat where
-  arbitrary = int2Nat . abs <$> arbitrary
 
 instance Mutate Nat where
   mutate Zero = Succ <$> arbitrary

@@ -3,6 +3,7 @@ module LazyShrink where
 import Data.IORef
 import System.IO.Unsafe
 import Data.List
+import Test.QuickCheck
 
 {- It looks like instances of `Lazy` can be derived automatically with
  - very little effort -}
@@ -27,8 +28,16 @@ testAndPrune t p = do
   idxs <- findIndecies t p
   return $ prune t (sort idxs)
 
-lazyShrink :: Lazy a => (a -> Bool) -> a -> IO a
-lazyShrink p a = testAndPrune a p
+lazyShrink :: (Lazy a, Arbitrary a) => (a -> Bool) -> a -> IO a
+lazyShrink p a = testAndPrune a p >>= (\a -> go (filter (not . p) $ shrink a) a)
+  where
+    go [] a = return a 
+    go (a:as) a_old = do
+      a' <- testAndPrune a p
+      if p a' then
+        go as a_old
+      else
+        go (filter (not . p) (shrink a') ++ filter (\a_s -> numNodes a_s < numNodes a') as) a
 
 {- Test predicate -}
 data Tree a = Node a (Tree a) (Tree a)
@@ -38,6 +47,19 @@ data Tree a = Node a (Tree a) (Tree a)
 data Nat = Zero
          | Succ Nat
          deriving Show
+
+instance Arbitrary a => Arbitrary (Tree a) where
+  arbitrary = sized go
+    where 
+      go 0 = return Leaf
+      go d = oneof [ return Leaf, Node <$> arbitrary <*> go (d - 1) <*> go (d - 1) ]
+
+  shrink Leaf = []
+  shrink (Node v l r) =  (Node <$> take 3 (shrink v) <*> return l <*> return r)
+                      ++ [l]
+                      ++ [r]
+                      ++ take 1000 (Node <$> return v <*> shrink l <*> return r)
+                      ++ take 1000 (Node <$> return v <*> return l <*> shrink r)
 
 instance Lazy a => Lazy (Tree a) where
   numNodes t = case t of
@@ -58,6 +80,16 @@ instance Lazy a => Lazy (Tree a) where
           truncate i xs = filter (>=0) $ map (\x -> x - i) xs
       in Node v' l' r'
   prune _ _ = Leaf 
+
+int2Nat :: Int -> Nat
+int2Nat 0 = Zero
+int2Nat n = Succ (int2Nat (n - 1))
+
+instance Arbitrary Nat where
+  arbitrary = int2Nat . abs <$> arbitrary
+
+  shrink Zero = []
+  shrink (Succ n) = n : shrink n
 
 instance Lazy Nat where
   numNodes t = case t of
